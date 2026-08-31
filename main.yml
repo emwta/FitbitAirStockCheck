@@ -3,7 +3,7 @@ name: Stock Checker Bot
 on:
   schedule:
     # ตั้งค่าให้รันทุกๆ 15 นาที (ระวังตั้งถี่ไป Google อาจบล็อก IP ของ GitHub)
-    - cron: '*/30 * * * *'
+    - cron: '*/5 * * * *'
   workflow_dispatch: # อนุญาตให้เรากดรันแบบ Manual เองได้จากหน้าเว็บ
 
 jobs:

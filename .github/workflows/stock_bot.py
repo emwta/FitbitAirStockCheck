@@ -19,9 +19,12 @@ def check_stock():
         try:
             page.goto(URL, wait_until="networkidle")
             page.wait_for_timeout(3000) 
-            page_content = page.content()
             
-            if "カートに追加" in page_content or "Add to cart" in page_content:
+            # เปลี่ยนจากการดึง HTML ทั้งหน้า มาดึงเฉพาะข้อความเปล่าๆ ที่โชว์บนหน้าจอ
+            visible_text = page.locator("body").inner_text()
+            
+            # นำ visible_text มาเช็คแทน
+            if "カートに追加" in visible_text or "Add to cart" in visible_text:
                 msg = f"🚨 <b>สินค้ามาแล้ว!</b>\n<a href='{URL}'>คลิกที่นี่เพื่อไปหน้าสั่งซื้อ</a>"
                 send_telegram_message(msg)
                 print("เจอของแล้ว ส่งข้อความสำเร็จ")

@@ -65,6 +65,10 @@ OUT_OF_STOCK_PHRASES = [
     "temporarily out of stock",
     "coming soon",
     "unavailable",
+    "在庫切れ",       # out of stock
+    "入荷通知",       # restock notification
+    "品切れ",         # out of stock
+    "販売終了",       # sales ended
 ]
 
 # Phrases that indicate it CAN be purchased.
@@ -72,6 +76,9 @@ IN_STOCK_PHRASES = [
     "buy",
     "add to cart",
     "check out",
+    "カートに追加",   # add to cart
+    "購入",           # purchase
+    "レジに進む",     # proceed to checkout
 ]
 
 
@@ -106,11 +113,22 @@ def fetch_status(url: str) -> dict:
         browser.close()
 
     label_lower = label.lower()
-    is_out = any(p in label_lower for p in OUT_OF_STOCK_PHRASES)
-    is_in = any(p in label_lower for p in IN_STOCK_PHRASES)
+
+    # The collected label often concatenates buttons from unrelated cards on
+    # the page (e.g. an "Original" family card AND a "Special Edition" family
+    # card, plus Pixel Care+/trade-in buttons). The actual CTA for the
+    # variant selected via the URL is reliably the LAST segment(s), e.g.
+    # "...ログインして入荷通知を登録する" (out of stock) or
+    # "...カートに追加する | こちら" (in stock). Only inspect the tail.
+    segments = [s.strip() for s in label.split("|") if s.strip()]
+    tail = " ".join(segments[-2:]) if len(segments) >= 2 else (segments[-1] if segments else "")
+    tail_lower = tail.lower()
+
+    is_out = any(p in tail_lower for p in OUT_OF_STOCK_PHRASES)
+    is_in = any(p in tail_lower for p in IN_STOCK_PHRASES)
     in_stock = is_in and not is_out
 
-    return {"in_stock": in_stock, "raw_label": label}
+    return {"in_stock": in_stock, "raw_label": label, "tail_checked": tail}
 
 
 def load_last_state() -> dict:

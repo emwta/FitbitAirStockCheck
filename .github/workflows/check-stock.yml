@@ -3,7 +3,7 @@ name: Check Stock
 on:
   schedule:
     # Runs every 10 minutes. GitHub may delay this during high load.
-    - cron: "*/10 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch: {}   # lets you trigger it manually from the Actions tab
 
 # Avoid overlapping runs if one takes longer than 10 minutes.
@@ -16,6 +16,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write   # needed so the workflow can commit state.json back
+    # If check_stock.py / requirements.txt live in a subfolder (e.g. this repo
+    # keeps everything under "stock-checker/"), set that folder here. If you
+    # moved the files to the repo root instead, change this to "."
+    defaults:
+      run:
+        working-directory: stock-checker
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4

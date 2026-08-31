@@ -8,7 +8,7 @@ CHAT_ID = os.environ.get('CHAT_ID')
 URL = 'https://store.google.com/jp/config/google_fitbit_air?hl=ja&selections=eyJwcm9kdWN0RmFtaWx5IjoiWjI5dloyeGxYMlpwZEdKcGRGOWhhWEk9IiwidmFyaWFudHMiOltbIjciLCJNVEE9Il1dfQ%3D%3D'
 
 def send_telegram_message(message):
-    send_url = f"https://api.telegram.org/bot8981930253:AAH8AQOT4t3Am5gqPM2xlTV3PW-LZZQ6hrg/sendMessage"
+    send_url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {'chat_id': CHAT_ID, '287460074': message, 'parse_mode': 'HTML'}
     requests.post(send_url, data=payload)
 

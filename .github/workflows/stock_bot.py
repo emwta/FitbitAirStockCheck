@@ -2,7 +2,6 @@ import os
 import requests
 from playwright.sync_api import sync_playwright
 
-# ดึงค่าจาก GitHub Secrets
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 CHAT_ID = os.environ.get('CHAT_ID')
 URL = 'https://store.google.com/jp/config/google_fitbit_air?hl=ja&selections=eyJwcm9kdWN0RmFtaWx5IjoiWjI5dloyeGxYMlpwZEdKcGRGOWhhWEk9IiwidmFyaWFudHMiOltbIjciLCJNVEE9Il1dfQ%3D%3D'
@@ -20,10 +19,8 @@ def check_stock():
             page.goto(URL, wait_until="networkidle")
             page.wait_for_timeout(3000) 
             
-            # เปลี่ยนจากการดึง HTML ทั้งหน้า มาดึงเฉพาะข้อความเปล่าๆ ที่โชว์บนหน้าจอ
             visible_text = page.locator("body").inner_text()
             
-            # นำ visible_text มาเช็คแทน
             if "カートに追加" in visible_text or "Add to cart" in visible_text:
                 msg = f"🚨 <b>สินค้ามาแล้ว!</b>\n<a href='{URL}'>คลิกที่นี่เพื่อไปหน้าสั่งซื้อ</a>"
                 send_telegram_message(msg)

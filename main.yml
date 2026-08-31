@@ -1,0 +1,31 @@
+name: Stock Checker Bot
+
+on:
+  schedule:
+    # ตั้งค่าให้รันทุกๆ 15 นาที (ระวังตั้งถี่ไป Google อาจบล็อก IP ของ GitHub)
+    - cron: '*/30 * * * *'
+  workflow_dispatch: # อนุญาตให้เรากดรันแบบ Manual เองได้จากหน้าเว็บ
+
+jobs:
+  check-stock:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests playwright
+          playwright install chromium
+
+      - name: Run Stock Bot
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: python stock_bot.py

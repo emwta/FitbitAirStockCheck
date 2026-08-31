@@ -2,19 +2,18 @@ name: Stock Checker Bot
 
 on:
   schedule:
-    # ตั้งค่าให้รันทุกๆ 15 นาที (ระวังตั้งถี่ไป Google อาจบล็อก IP ของ GitHub)
-    - cron: '*/5 * * * *'
-  workflow_dispatch: # อนุญาตให้เรากดรันแบบ Manual เองได้จากหน้าเว็บ
+    - cron: '*/5 * * * *' # แนะนำให้ปรับเป็น 30 นาทีถ้าใช้ Private Repo ป้องกันโควต้าหมด
+  workflow_dispatch:
 
 jobs:
   check-stock:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4 # <-- เปลี่ยนเป็น v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5 # <-- เปลี่ยนเป็น v5
         with:
           python-version: '3.10'
 

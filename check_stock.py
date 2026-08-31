@@ -146,7 +146,7 @@ def build_message(current: dict) -> str:
     name_width = max(len(n) for n in VARIANTS) + 4
     lines = []
     for name in VARIANTS:
-        status = "IN" if current[name]["in_stock"] else "OUT"
+        status = "🟢 IN" if current[name]["in_stock"] else "🔴 OUT"
         lines.append(f" {name:<{name_width}}{status}")
 
     now_str = datetime.now(TZ).strftime("%d %b %Y %H:%M ICT")

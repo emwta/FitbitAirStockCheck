@@ -2,11 +2,14 @@ name: Check Stock
 
 on:
   #schedule:
-    # Runs every 10 minutes. GitHub may delay this during high load.
-    #- cron: "*/30 * * * *"
+    # Runs every 5 minutes - this is the shortest interval GitHub supports
+    # for scheduled workflows. Actual runs may be delayed a few minutes
+    # during periods of high GitHub Actions load - this is normal.
+    #- cron: "*/5 * * * *"
   workflow_dispatch: {}   # lets you trigger it manually from the Actions tab
 
-# Avoid overlapping runs if one takes longer than 10 minutes.
+# Prevents a new run from starting while a previous one is still going -
+# important now that runs are more frequent than the check itself might take.
 concurrency:
   group: check-stock
   cancel-in-progress: false
@@ -14,21 +17,25 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # Official Playwright image: Chromium + all system libraries are already
+    # installed inside it, so we skip apt-get and the browser download that
+    # were eating ~1-2 minutes of every run. Keep this tag's version in sync
+    # with the "playwright" version pinned in requirements.txt.
+    container:
+      image: mcr.microsoft.com/playwright/python:v1.47.0-jammy
     permissions:
       contents: write   # needed so the workflow can commit state.json back
     steps:
+      - name: Install git
+        # The Playwright image doesn't ship git by default; checkout/commit need it.
+        run: apt-get update && apt-get install -y --no-install-recommends git
+
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-          playwright install --with-deps chromium
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+        # No "playwright install" step needed - Chromium is already in the image.
 
       - name: Run stock check
         env:
@@ -40,6 +47,7 @@ jobs:
 
       - name: Commit updated state
         run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git config user.name "stock-bot"
           git config user.email "stock-bot@users.noreply.github.com"
           git add state.json

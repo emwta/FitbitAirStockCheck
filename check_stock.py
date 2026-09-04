@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
 """
-Google Store multi-variant stock checker -> Telegram notifier.
+Google Store multi-variant stock checker -> Telegram notifier (fast/async).
 
 Watches several color variants of a product (each its own store.google.com
-config URL), and sends ONE formatted Telegram message showing the status of
-ALL variants whenever ANY variant's status changes (in-stock <-> out-of-stock).
-No message is sent if nothing changed since the last run.
+config URL). All variants are checked CONCURRENTLY using one shared browser
+instance (one tab per variant) instead of sequentially, and each page only
+waits for its buy/notify button to actually appear instead of waiting for
+"networkidle" (which Google's analytics traffic can delay) or a fixed sleep.
+
+Sends ONE formatted Telegram message showing the status of ALL variants
+whenever ANY variant's status changes (in-stock <-> out-of-stock). No
+message is sent if nothing changed since the last run.
 
 State (last known status per variant) is persisted to state.json so re-runs
 on GitHub Actions know whether anything actually changed.
 """
 
+import asyncio
 import json
 import os
 import sys
@@ -18,15 +24,12 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from playwright.sync_api import sync_playwright
+from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 
 # ---- Config -----------------------------------------------------------
 
 TITLE = "Fitbit Air Stock Monitor"
 
-# Fill in the real per-color URLs here. Name -> full store.google.com URL.
-# (Placeholder URLs below all point at the base product page - replace with
-# the URL you get after selecting each color, per the instructions given.)
 VARIANTS: dict[str, str] = {
     "Obsidian": (
         "https://store.google.com/jp/config/google_fitbit_air?hl=ja&selections="
@@ -57,6 +60,10 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 TZ = ZoneInfo("Asia/Bangkok")  # ICT
 
+# How long to wait for a buy/notify button to show up before giving up on a
+# variant and falling back to whatever buttons happen to be on the page.
+BUTTON_WAIT_MS = 12000
+
 # Phrases that indicate the item CANNOT be purchased right now.
 OUT_OF_STOCK_PHRASES = [
     "sold out",
@@ -81,17 +88,30 @@ IN_STOCK_PHRASES = [
     "レジに進む",     # proceed to checkout
 ]
 
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+)
 
-def fetch_status(url: str) -> dict:
-    """Render one variant's page and return {'in_stock': bool, 'raw_label': str}."""
-    with sync_playwright() as p:
-        browser = p.chromium.launch()
-        page = browser.new_page(user_agent=(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-        ))
-        page.goto(url, wait_until="networkidle", timeout=60000)
-        page.wait_for_timeout(3000)
+BUTTON_SELECTOR = (
+    "button[aria-label*='Buy' i], button[aria-label*='Notify' i], "
+    "[data-test-id*='buy' i] button, main button"
+)
+
+
+async def fetch_status(browser, name: str, url: str) -> tuple[str, dict]:
+    """Render one variant's page (its own tab) and classify in/out of stock."""
+    page = await browser.new_page(user_agent=USER_AGENT)
+    try:
+        # domcontentloaded is enough - we don't need every background
+        # analytics/tracking request to finish (that's what made
+        # "networkidle" slow and sometimes time out).
+        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+
+        try:
+            await page.wait_for_selector(BUTTON_SELECTOR, timeout=BUTTON_WAIT_MS)
+        except PlaywrightTimeoutError:
+            pass  # fall through and just grab whatever buttons exist
 
         label = ""
         for selector in [
@@ -100,19 +120,19 @@ def fetch_status(url: str) -> dict:
             "[data-test-id*='buy' i] button",
             "main button",
         ]:
-            els = page.query_selector_all(selector)
+            els = await page.query_selector_all(selector)
             if els:
-                label = " | ".join(e.inner_text().strip() for e in els if e.inner_text().strip())
+                texts = [t.strip() for t in await asyncio.gather(*(e.inner_text() for e in els))]
+                label = " | ".join(t for t in texts if t)
                 if label:
                     break
 
         if not label:
-            buttons = page.query_selector_all("button")
-            label = " | ".join(b.inner_text().strip() for b in buttons if b.inner_text().strip())
-
-        browser.close()
-
-    label_lower = label.lower()
+            buttons = await page.query_selector_all("button")
+            texts = [t.strip() for t in await asyncio.gather(*(b.inner_text() for b in buttons))]
+            label = " | ".join(t for t in texts if t)
+    finally:
+        await page.close()
 
     # The collected label often concatenates buttons from unrelated cards on
     # the page (e.g. an "Original" family card AND a "Special Edition" family
@@ -128,7 +148,19 @@ def fetch_status(url: str) -> dict:
     is_in = any(p in tail_lower for p in IN_STOCK_PHRASES)
     in_stock = is_in and not is_out
 
-    return {"in_stock": in_stock, "raw_label": label, "tail_checked": tail}
+    return name, {"in_stock": in_stock, "raw_label": label, "tail_checked": tail}
+
+
+async def fetch_all() -> dict:
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        try:
+            results = await asyncio.gather(
+                *(fetch_status(browser, name, url) for name, url in VARIANTS.items())
+            )
+        finally:
+            await browser.close()
+    return dict(results)
 
 
 def load_last_state() -> dict:
@@ -146,7 +178,7 @@ def build_message(current: dict) -> str:
     name_width = max(len(n) for n in VARIANTS) + 4
     lines = []
     for name in VARIANTS:
-        status = "🟢 IN" if current[name]["in_stock"] else "🔴 OUT"
+        status = "IN" if current[name]["in_stock"] else "OUT"
         lines.append(f" {name:<{name_width}}{status}")
 
     now_str = datetime.now(TZ).strftime("%d %b %Y %H:%M ICT")
@@ -164,7 +196,6 @@ def build_message(current: dict) -> str:
         separator,
     ])
 
-    # <pre> keeps the spacing/alignment fixed-width in Telegram.
     escaped = body.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     return f"<pre>{escaped}</pre>"
 
@@ -190,13 +221,12 @@ def send_telegram(message_html: str) -> None:
         resp.read()
 
 
-def main() -> int:
+async def main_async() -> int:
     previous = load_last_state()
-    current = {}
+    current = await fetch_all()
 
-    for name, url in VARIANTS.items():
-        current[name] = fetch_status(url)
-        print(f"{name}: {current[name]}")
+    for name, result in current.items():
+        print(f"{name}: {result}")
 
     changed = any(
         current[name]["in_stock"] != previous.get(name, {}).get("in_stock", False)
@@ -211,6 +241,10 @@ def main() -> int:
 
     save_state(current)
     return 0
+
+
+def main() -> int:
+    return asyncio.run(main_async())
 
 
 if __name__ == "__main__":

@@ -64,6 +64,12 @@ TZ = ZoneInfo("Asia/Bangkok")  # ICT
 # variant and falling back to whatever buttons happen to be on the page.
 BUTTON_WAIT_MS = 12000
 
+# Extra settle time after the button appears, to let the real stock-status
+# API response (which can arrive after the initial skeleton render) update
+# the DOM before we read the label. This runs concurrently across all
+# variant tabs, so it doesn't multiply by the number of variants.
+SETTLE_MS = 2500
+
 # Phrases that indicate the item CANNOT be purchased right now.
 OUT_OF_STOCK_PHRASES = [
     "sold out",
@@ -113,24 +119,39 @@ async def fetch_status(browser, name: str, url: str) -> tuple[str, dict]:
         except PlaywrightTimeoutError:
             pass  # fall through and just grab whatever buttons exist
 
-        label = ""
-        for selector in [
-            "button[aria-label*='Buy' i]",
-            "button[aria-label*='Notify' i]",
-            "[data-test-id*='buy' i] button",
-            "main button",
-        ]:
-            els = await page.query_selector_all(selector)
-            if els:
-                texts = [t.strip() for t in await asyncio.gather(*(e.inner_text() for e in els))]
-                label = " | ".join(t for t in texts if t)
-                if label:
-                    break
+        # The button shown right after page load is often a default/skeleton
+        # state (e.g. "Buy") - the REAL stock status arrives a bit later via
+        # a background API call that updates the DOM. Give that a bounded
+        # moment to land before reading the label. Since all variants run
+        # concurrently, this delay overlaps across tabs instead of stacking.
+        await page.wait_for_timeout(SETTLE_MS)
 
-        if not label:
+        async def read_label() -> str:
+            for selector in [
+                "button[aria-label*='Buy' i]",
+                "button[aria-label*='Notify' i]",
+                "[data-test-id*='buy' i] button",
+                "main button",
+            ]:
+                els = await page.query_selector_all(selector)
+                if els:
+                    texts = [t.strip() for t in await asyncio.gather(*(e.inner_text() for e in els))]
+                    joined = " | ".join(t for t in texts if t)
+                    if joined:
+                        return joined
+
             buttons = await page.query_selector_all("button")
             texts = [t.strip() for t in await asyncio.gather(*(b.inner_text() for b in buttons))]
-            label = " | ".join(t for t in texts if t)
+            return " | ".join(t for t in texts if t)
+
+        label = await read_label()
+        # Stabilization check: if the label is still changing (stock status
+        # API response still landing), wait a bit more and re-read. Prefer
+        # the later, more-settled reading.
+        await page.wait_for_timeout(1000)
+        label_recheck = await read_label()
+        if label_recheck and label_recheck != label:
+            label = label_recheck
     finally:
         await page.close()
 

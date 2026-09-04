@@ -13,25 +13,39 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    # Official Playwright image: Chromium + all system libraries are already
-    # installed inside it, so we skip apt-get and the browser download that
-    # were eating ~1-2 minutes of every run. Keep this tag's version in sync
-    # with the "playwright" version pinned in requirements.txt.
-    container:
-      image: mcr.microsoft.com/playwright/python:v1.47.0-jammy
     permissions:
       contents: write   # needed so the workflow can commit state.json back
     steps:
-      - name: Install git
-        # The Playwright image doesn't ship git by default; checkout/commit need it.
-        run: apt-get update && apt-get install -y --no-install-recommends git
-
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       - name: Install Python dependencies
         run: pip install -r requirements.txt
-        # No "playwright install" step needed - Chromium is already in the image.
+
+      # Caches the downloaded Chromium binary (~150MB) keyed on the exact
+      # playwright version in requirements.txt. First run after a version
+      # bump will be slow (cache miss); every run after that skips the
+      # download entirely and only takes a few seconds for system deps.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+
+      - name: Install Playwright browser
+        run: |
+          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
+            # Browser binary already cached - just make sure system libs are present.
+            playwright install-deps chromium
+          else
+            playwright install --with-deps chromium
+          fi
 
       - name: Run stock check
         env:
@@ -43,7 +57,6 @@ jobs:
 
       - name: Commit updated state
         run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git config user.name "stock-bot"
           git config user.email "stock-bot@users.noreply.github.com"
           git add state.json

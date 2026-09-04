@@ -1,15 +1,11 @@
 name: Check Stock
 
 on:
-  #schedule:
-    # Runs every 5 minutes - this is the shortest interval GitHub supports
-    # for scheduled workflows. Actual runs may be delayed a few minutes
-    # during periods of high GitHub Actions load - this is normal.
-    #- cron: "*/5 * * * *"
   workflow_dispatch: {}   # lets you trigger it manually from the Actions tab
+  repository_dispatch:
+    types: [stock-check]   # triggered externally, e.g. by cron-job.org calling the GitHub API
 
-# Prevents a new run from starting while a previous one is still going -
-# important now that runs are more frequent than the check itself might take.
+# Prevents a new run from starting while a previous one is still going.
 concurrency:
   group: check-stock
   cancel-in-progress: false
